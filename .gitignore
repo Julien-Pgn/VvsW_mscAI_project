@@ -1,0 +1,40 @@
+# macOS and Windows metadata
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python build output
+build/
+dist/
+*.egg-info/
+
+# Jupyter temporary files (keep notebooks tracked)
+.ipynb_checkpoints/
+.virtual_documents/
+
+# Local environment variables and secrets
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Editor temporary files
+*.swp
+*.swo
+*~
