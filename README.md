@@ -1,6 +1,7 @@
 # AI Group Project
 
-### Group members 
+### Group members
+
 - Filip Lurka
 - Julien Pigeon
 - Chandrika Mohan

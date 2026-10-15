@@ -1,117 +1,77 @@
+"""Binary TCP transport for the official Vampires vs Werewolves server."""
 import socket
-from typing import List
-
-import config
 
 
 class EndException(Exception):
-    pass
+    """Game ended; the connection may receive another setup."""
 
 
 class ByeException(Exception):
+    """Session ended."""
+
+
+class UnknownCommand(ValueError):
     pass
 
 
-class UnknownCommand(Exception):
-    pass
-
-
-def bytes_to_int(data: bytes) -> int:
-    return int.from_bytes(data, "little")
+def recv_exact(sock, length):
+    data = bytearray()
+    while len(data) < length:
+        chunk = sock.recv(length - len(data))
+        if not chunk:
+            raise EOFError("Server closed the connection")
+        data.extend(chunk)
+    return bytes(data)
 
 
 class ClientSocket:
-    def __init__(self, ip: str = config.SERVER_IP, port: int = config.SERVER_PORT):
-        self._socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._ip = ip
-        self._port = port
-        self._connected = False
-        self.connect_to_server(self._ip, self._port)
-        print(f"socket: {self._socket}")
+    def __init__(self, ip="127.0.0.1", port=5555, connect_timeout=10):
+        self._socket = socket.create_connection((ip, port), connect_timeout)
+        self._socket.settimeout(None)
+        self._socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
+    def close(self):
+        self._socket.close()
 
-    def connect_to_server(self, ip, port):
-        if not self._connected:
-            self._socket.connect((ip, port))
-            self._connected = True
-
-    def _get_command(self) -> str:
-        if not self._connected:
-            self.connect_to_server(self._ip, self._port)
-        data = bytes()
-        while len(data) < 3:
-            data += self._socket.recv(3 - len(data))
-        return data.decode()
-
-    def _get_message(self, length: int) -> int:
-        if not self._connected:
-            self.connect_to_server(self._ip, self._port)
-        data: bytes = bytes()
-        while len(data) < length:
-            data += self._socket.recv(1 - len(data))
-        return bytes_to_int(data)
-
-    def _parse_message(self) -> List:
-        command: str = self._get_command()
-        if command == "END":
+    def get_message(self):
+        tag = recv_exact(self._socket, 3)
+        if tag == b"END":
             raise EndException()
-        if command == "BYE":
+        if tag == b"BYE":
             raise ByeException()
-        elif command not in ["SET", "HUM", "HME", "MAP", "UPD"]:
-            raise ValueError("Command unknown")
+        if tag == b"SET":
+            return ["set", list(recv_exact(self._socket, 2))]
+        if tag == b"HME":
+            return ["hme", list(recv_exact(self._socket, 2))]
+        if tag in (b"HUM", b"MAP", b"UPD"):
+            count = recv_exact(self._socket, 1)[0]
+            width = 2 if tag == b"HUM" else 5
+            payload = recv_exact(self._socket, count * width)
+            return [tag.decode("ascii").lower(),
+                    [tuple(payload[i:i + width])
+                     for i in range(0, len(payload), width)]]
+        raise UnknownCommand(f"Unknown server command: {tag!r}")
 
-        if command == "SET":
-            return ["set", [self._get_message(1), self._get_message(1)]]
+    def send_nme(self, name):
+        encoded = name.encode("ascii")
+        if not 1 <= len(encoded) <= 255:
+            raise ValueError("Name must contain 1-255 ASCII bytes")
+        self._socket.sendall(b"NME" + bytes([len(encoded)]) + encoded)
 
-        if command == "HUM":
-            humans = []
-            nb = self._get_message(1)
-            for i in range(nb):
-                humans.append([self._get_message(1), self._get_message(1)])
-            return ["hum", humans]
-
-        if command == "HME":
-            return ["hme", [self._get_message(1), self._get_message(1)]]
-
-        if command == "MAP":
-            map = []
-            nb = self._get_message(1)
-            for i in range(nb):
-                map.append((self._get_message(1), self._get_message(1), self._get_message(1), self._get_message(1),
-                            self._get_message(1)))
-            return ["map", map]
-
-        if command == "UPD":
-            upd = []
-            nb = self._get_message(1)
-            for i in range(nb):
-                upd.append((self._get_message(1), self._get_message(1), self._get_message(1), self._get_message(1),
-                            self._get_message(1)))
-            return ["upd", upd]
-
-    def get_message(self) -> List:
-        try:
-            return self._parse_message()
-        except OSError:
-            return None
-        except IOError as e:
-            print(e)
-        except EndException:
-            raise
-        except ByeException:
-            raise
-
-    def send_nme(self, name: str):
-        if not self._connected:
-            print("trying to connect to server")
-            self.connect_to_server(self._ip, self._port)
-
-        self._socket.send("NME".encode() + bytes([len(name)]) + name.encode())
-
-    def send_mov(self, nb_moves: int, moves):
-        message = bytes([nb_moves])
+    def send_mov(self, nb_moves, moves, timeout=None):
+        if nb_moves != len(moves) or not 1 <= nb_moves <= 255:
+            raise ValueError("MOV must contain 1-255 records matching its count")
+        payload = bytearray([nb_moves])
         for move in moves:
-            for data in move:
-                message += bytes([data])
-
-        self._socket.send("MOV".encode() + message)
+            if len(move) != 5 or any(type(v) is not int or not 0 <= v <= 255
+                                     for v in move) or move[2] == 0:
+                raise ValueError("Move must be five bytes: sx, sy, count>0, tx, ty")
+            payload.extend(move)
+        if timeout is not None and timeout <= 0:
+            raise TimeoutError("Turn deadline exceeded before sending")
+        previous_timeout = self._socket.gettimeout()
+        try:
+            self._socket.settimeout(timeout)
+            self._socket.sendall(b"MOV" + payload)
+        finally:
+            self._socket.settimeout(previous_timeout)

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vampires vs Werewolves — local match replay</title>
+<style>
+body{font:16px system-ui,sans-serif;max-width:950px;margin:24px auto;padding:0 18px;background:#111827;color:#e5e7eb}
+h1{font-size:24px}button,select,input{font:inherit;margin:6px;padding:6px}canvas{display:block;background:#1f2937;width:100%;height:auto;border:1px solid #475569;margin-top:16px}input{width:min(55%,500px)}p{line-height:1.5}.human{color:#fbbf24}.vampire{color:#c4b5fd}.wolf{color:#67e8f9}
+</style>
+<h1>Local match replay</h1>
+<p>Development Python referee. <span class="human">H = humans</span>, <span class="vampire">V = vampires</span>, <span class="wolf">W = werewolves</span>. Numbers show group populations.</p>
+<label>Game <select id="game" aria-label="Select game"></select></label>
+<button id="play">Play</button>
+<label>Ply <input id="step" type="range" min="0" value="0" aria-label="Replay ply"></label>
+<p id="status" aria-live="polite"></p>
+<canvas id="board" width="900" height="500" aria-label="Game board"></canvas>
+<p id="result"></p>
+<script>
+const events=/*MATCH_EVENTS*/[];
+const starts=events.filter(e=>e.event==='game_start');
+const select=document.getElementById('game'), slider=document.getElementById('step');
+const canvas=document.getElementById('board'), ctx=canvas.getContext('2d');
+let frames=[],current=null,timer=null;
+starts.forEach((g,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`${g.game}: ${g.players.join(' vs ')}`;select.append(o)});
+function stop(){clearInterval(timer);timer=null;document.getElementById('play').textContent='Play'}
+function draw(){
+ if(!current)return;
+ const frame=frames[Number(slider.value)], size=Math.max(20,Math.min(70,900/current.columns));
+ canvas.width=Math.round(size*current.columns);canvas.height=Math.round(size*current.rows);
+ ctx.fillStyle='#1f2937';ctx.fillRect(0,0,canvas.width,canvas.height);
+ ctx.strokeStyle='#475569';ctx.lineWidth=1;
+ for(let x=0;x<=current.columns;x++){ctx.beginPath();ctx.moveTo(x*size,0);ctx.lineTo(x*size,canvas.height);ctx.stroke()}
+ for(let y=0;y<=current.rows;y++){ctx.beginPath();ctx.moveTo(0,y*size);ctx.lineTo(canvas.width,y*size);ctx.stroke()}
+ ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`600 ${Math.max(10,size*.25)}px system-ui`;
+ for(const [x,y,h,v,w] of frame.board){ctx.fillStyle=h?'#fbbf24':v?'#c4b5fd':'#67e8f9';ctx.fillText(`${h?'H':v?'V':'W'}${h||v||w}`,(x+.5)*size,(y+.5)*size)}
+ document.getElementById('status').textContent=`Game ${current.game} · ply ${frame.ply||0}/${frames.length-1} · player 0: ${current.species[0]===1?'vampires':'werewolves'} · player 1: ${current.species[1]===1?'vampires':'werewolves'}`;
+}
+function load(){stop();current=starts[Number(select.value)];if(!current)return;frames=[current,...events.filter(e=>e.event==='move'&&e.game===current.game)];slider.max=frames.length-1;slider.value=0;const end=events.find(e=>e.event==='game_end'&&e.game===current.game);document.getElementById('result').textContent=end?`Result: ${end.winner_name===null?'draw':end.winner_name+' wins'} (${end.reason}).`:'No completed result.';draw()}
+slider.addEventListener('input',draw);select.addEventListener('change',load);
+document.getElementById('play').addEventListener('click',()=>{if(timer){stop();return}if(Number(slider.value)>=frames.length-1)slider.value=0;document.getElementById('play').textContent='Pause';timer=setInterval(()=>{if(Number(slider.value)>=frames.length-1){stop();return}slider.value=Number(slider.value)+1;draw()},350)});
+if(starts.length)load();else{document.getElementById('status').textContent='No game started. Check server.stderr.log.';document.getElementById('play').disabled=true;slider.disabled=true}
+</script>
+</html>
