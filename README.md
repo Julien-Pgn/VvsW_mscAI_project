@@ -5,4 +5,4 @@
 - Filip Lurka
 - Julien Pigeon
 - Chandrika Mohan
-- Paul-Andréas Laize
+- Paul-Andréas Laizé
